@@ -4,22 +4,22 @@
 
 ```mermaid
 flowchart TD
-    A[User request] --> B[Input Guardrails]
-    B -->|Injection/off-topic| R1[Refuse + explain policy]
+    A[User request] --> B[Input guardrails]
+    B -->|Injection or off topic| R1[Refuse and explain policy]
     B -->|Pass| C[LLM response draft]
-    C --> D[Output Guardrails + Safety Judge]
-    D -->|Unsafe/PII| R2[Block or redact response]
-    D -->|Safe| E[Confidence Router]
+    C --> D[Output guardrails and safety judge]
+    D -->|Unsafe or PII| R2[Block or redact response]
+    D -->|Safe| E[Confidence router]
 
-    E -->|High confidence AND low risk| F[Auto-send to user]
-    E -->|Medium confidence| G[Queue review (Human-on-the-loop)]
-    E -->|Low confidence| H[Escalate (Human-in-the-loop)]
-    E -->|High-risk action| H
+    E -->|High confidence and low risk| F[Auto send to user]
+    E -->|Medium confidence| G[Queue for human review]
+    E -->|Low confidence| H[Escalate to human approval]
+    E -->|High risk action| H
 
     G --> I[Human reviewer decision]
     H --> I
     I -->|Approve| F
-    I -->|Reject| R3[Refuse + request safer/verified input]
+    I -->|Reject| R3[Refuse and request verified input]
 ```
 
 ## Decision Point Details
