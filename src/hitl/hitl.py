@@ -37,6 +37,7 @@ class RoutingDecision:
     reason: str
     priority: str        # "low", "normal", "high"
     requires_human: bool
+    hitl_model: str      # e.g. none, human-in-the-loop, human-on-the-loop
 
 
 class ConfidenceRouter:
@@ -65,32 +66,42 @@ class ConfidenceRouter:
         Returns:
             RoutingDecision with routing action and metadata
         """
-        # TODO 12: Implement routing logic
-        #
-        # 1. Check if action_type is in HIGH_RISK_ACTIONS
-        #    -> If yes: always escalate (action="escalate", priority="high",
-        #       requires_human=True, reason="High-risk action: {action_type}")
-        #
-        # 2. Check confidence thresholds:
-        #    - confidence >= 0.9:
-        #      action="auto_send", priority="low",
-        #      requires_human=False, reason="High confidence"
-        #
-        #    - 0.7 <= confidence < 0.9:
-        #      action="queue_review", priority="normal",
-        #      requires_human=True, reason="Medium confidence — needs review"
-        #
-        #    - confidence < 0.7:
-        #      action="escalate", priority="high",
-        #      requires_human=True, reason="Low confidence — escalating"
+        if action_type in HIGH_RISK_ACTIONS:
+            return RoutingDecision(
+                action="escalate",
+                confidence=confidence,
+                reason=f"High-risk action: {action_type}",
+                priority="high",
+                requires_human=True,
+                hitl_model="human-in-the-loop",
+            )
 
+        if confidence >= self.HIGH_THRESHOLD:
+            return RoutingDecision(
+                action="auto_send",
+                confidence=confidence,
+                reason="High confidence",
+                priority="low",
+                requires_human=False,
+                hitl_model="none",
+            )
+        if confidence >= self.MEDIUM_THRESHOLD:
+            return RoutingDecision(
+                action="queue_review",
+                confidence=confidence,
+                reason="Medium confidence — needs review",
+                priority="normal",
+                requires_human=True,
+                hitl_model="human-on-the-loop",
+            )
         return RoutingDecision(
-            action="auto_send",
+            action="escalate",
             confidence=confidence,
-            reason="TODO: implement routing logic",
-            priority="low",
-            requires_human=False,
-        )  # TODO: Replace with implementation
+            reason="Low confidence — escalating",
+            priority="high",
+            requires_human=True,
+            hitl_model="human-in-the-loop",
+        )
 
 
 # ============================================================
@@ -109,27 +120,36 @@ class ConfidenceRouter:
 hitl_decision_points = [
     {
         "id": 1,
-        "name": "TODO: Name this decision point",
-        "trigger": "TODO: When does this trigger?",
-        "hitl_model": "TODO: human-in-the-loop / human-on-the-loop / human-as-tiebreaker",
-        "context_needed": "TODO: What does the reviewer need to see?",
-        "example": "TODO: Give a concrete example scenario",
+        "name": "High-value outbound transfer",
+        "scenario": "Large or unusual transfer to a new or high-risk beneficiary.",
+        "trigger": "Customer requests a transfer above policy threshold (e.g. > 50M VND) or to a new payee.",
+        "hitl_model": "human-in-the-loop",
+        "context_for_human": "Source account, payee KYC status, transfer history, device/session risk score.",
+        "expected_response_time": "< 5 minutes",
+        "context_needed": "Source account, payee KYC status, transfer history, device/session risk score.",
+        "example": "User asks to wire 80M VND to a first-time beneficiary while abroad.",
     },
     {
         "id": 2,
-        "name": "TODO: Name this decision point",
-        "trigger": "TODO: When does this trigger?",
-        "hitl_model": "TODO: human-in-the-loop / human-on-the-loop / human-as-tiebreaker",
-        "context_needed": "TODO: What does the reviewer need to see?",
-        "example": "TODO: Give a concrete example scenario",
+        "name": "Account closure or credential reset",
+        "scenario": "Irreversible product closure or credential recovery.",
+        "trigger": "Closure of all products, password reset, or token issuance for high-privilege actions.",
+        "hitl_model": "human-in-the-loop",
+        "context_for_human": "Identity verification result, recent alerts, duplicate requests, branch notes.",
+        "expected_response_time": "< 15 minutes",
+        "context_needed": "Identity verification result, recent alerts, duplicate requests, branch notes.",
+        "example": "Chatbot schedules full account closure after suspected social-engineering cues.",
     },
     {
         "id": 3,
-        "name": "TODO: Name this decision point",
-        "trigger": "TODO: When does this trigger?",
-        "hitl_model": "TODO: human-in-the-loop / human-on-the-loop / human-as-tiebreaker",
-        "context_needed": "TODO: What does the reviewer need to see?",
-        "example": "TODO: Give a concrete example scenario",
+        "name": "Model disagreement / low confidence",
+        "scenario": "Policy or judge disagrees with the draft answer.",
+        "trigger": "Safety judge conflicts with policy engine, or confidence score below routing threshold.",
+        "hitl_model": "human-as-tiebreaker",
+        "context_for_human": "Draft reply, judge rationale, triggered rules, customer segment.",
+        "expected_response_time": "< 10 minutes",
+        "context_needed": "Draft reply, judge rationale, triggered rules, customer segment.",
+        "example": "Ambiguous fee dispute where the model is 62% confident and judges disagree.",
     },
 ]
 
@@ -152,14 +172,17 @@ def test_confidence_router():
 
     print("Testing ConfidenceRouter:")
     print("=" * 80)
-    print(f"{'Scenario':<25} {'Conf':<6} {'Action Type':<18} {'Decision':<15} {'Priority':<10} {'Human?'}")
+    print(
+        f"{'Scenario':<22} {'Conf':<6} {'Action Type':<16} {'Decision':<14} "
+        f"{'HITL model':<22} {'Human?'}"
+    )
     print("-" * 80)
 
     for scenario, conf, action_type in test_cases:
         decision = router.route(scenario, conf, action_type)
         print(
-            f"{scenario:<25} {conf:<6.2f} {action_type:<18} "
-            f"{decision.action:<15} {decision.priority:<10} "
+            f"{scenario:<22} {conf:<6.2f} {action_type:<16} "
+            f"{decision.action:<14} {decision.hitl_model:<22} "
             f"{'Yes' if decision.requires_human else 'No'}"
         )
 
@@ -172,9 +195,12 @@ def test_hitl_points():
     print("=" * 60)
     for point in hitl_decision_points:
         print(f"\n  Decision Point #{point['id']}: {point['name']}")
+        if point.get("scenario"):
+            print(f"    Scenario: {point['scenario']}")
         print(f"    Trigger:  {point['trigger']}")
         print(f"    Model:    {point['hitl_model']}")
-        print(f"    Context:  {point['context_needed']}")
+        print(f"    Context:  {point.get('context_for_human') or point['context_needed']}")
+        print(f"    SLA:      {point.get('expected_response_time', 'n/a')}")
         print(f"    Example:  {point['example']}")
     print("\n" + "=" * 60)
 
